@@ -1,0 +1,57 @@
+﻿@page "/"
+@using System.Xml
+@using System.Text
+@using Newtonsoft.Json
+@using RabbitMQ.Client
+@using RabbitMQ.Examples.Publisher.Models
+@using System.Text
+
+<PageTitle>Index</PageTitle>
+
+<h1>Hello, world!</h1>
+
+
+<InputFile OnChange="@LoadFiles"/>
+<p>
+    <label class="text-danger" id="error-label" @bind="_errorText"></label>
+</p>
+
+<button class="btn-primary" @onclick="SubmitFile">Submit</button>
+
+@code {
+    private IBrowserFile _file;
+    private string _errorText;
+    
+    private async void LoadFiles(InputFileChangeEventArgs e)
+    {
+        _file = e.File;
+    }
+
+    private async void SubmitFile()
+    {
+        var xmlString = await new StreamReader(_file.OpenReadStream()).ReadToEndAsync();
+        var xmlDoc = new XmlDocument();
+        xmlDoc.LoadXml(xmlString);
+        if (!XmlHelper.ValidateXml(xmlDoc))
+        {
+            _errorText = "Invalid xml file";
+            return;
+        }
+
+        var tariffJson = XmlHelper.XmlToJson(xmlDoc);
+        PublishTariffToRabbitQueue(tariffJson);
+    }
+    
+    private void PublishTariffToRabbitQueue(string tariffJson)
+    {
+        var factory = new ConnectionFactory() { Endpoint = new AmqpTcpEndpoint("localhost", 5672), UserName = "user", Password = "bitnami"};
+        using var connection = factory.CreateConnection();
+        using var channel = connection.CreateModel();
+
+        channel.QueueDeclare("tariffs-queue", true, false, false, null);
+
+        var body = Encoding.UTF8.GetBytes(tariffJson);
+        
+        channel.BasicPublish(string.Empty, "tariffs-queue", null, body);
+    }
+}
